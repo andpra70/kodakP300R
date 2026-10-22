@@ -1,0 +1,6 @@
+analysis
+dist
+node_modules
+*.tsbuildinfo
+artifacts
+tools

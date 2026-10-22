@@ -1,0 +1,21 @@
+services:
+  kodak2-web:
+    image: ${IMAGE_REF:-docker.io/andpra70/kodak-k-print-web:latest}
+    container_name: kodak2-web
+    pull_policy: always
+    restart: unless-stopped
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - front-controller-internal
+
+networks:
+  front-controller-internal:
+    external: true
+    name: ${FRONT_CONTROLLER_INTERNAL_NETWORK:-front-controller_internal-services}
