@@ -1,0 +1,7 @@
+.git
+analysis
+artifacts
+dist
+web/dist
+web/node_modules
+*.tsbuildinfo

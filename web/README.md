@@ -24,6 +24,11 @@ npm run dev
 Aprire l'indirizzo mostrato da Vite, caricare o trascinare la foto nell'anteprima,
 scegliere P300R o P210R,
 premere **Collega stampante** e selezionare la porta Serial Port della Kodak.
+Con **Foto intera** disattivato è possibile trascinare la foto per modificare
+l'inquadratura e usare il controllo Zoom per ridimensionarla. La rotella del
+mouse effettua lo zoom mantenendo fermo il punto della foto sotto il cursore.
+La scala va dal 25% al 300%; sotto il 100% le parti del foglio non coperte
+dall'immagine restano bianche.
 
 La Web Bluetooth API non viene usata perché supporta BLE/GATT. Chrome espone
 invece SPP/RFCOMM tramite Web Serial. Il browser richiede sempre un gesto e una
@@ -45,6 +50,15 @@ cd web
 
 # Avvia localmente l'immagine già costruita su http://localhost:6066
 ./run.sh
+```
+
+Dalla radice del progetto sono inoltre disponibili `docker-compose.yml`,
+`deploy.sh` e `publish.sh`, compatibili con gli script globali in `../../`:
+
+```sh
+docker compose up --build -d
+./deploy.sh
+./publish.sh
 ```
 
 `deploy.sh` costruisce l'immagine per `linux/amd64` e la invia al registry
