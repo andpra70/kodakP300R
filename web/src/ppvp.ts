@@ -9,6 +9,8 @@ interface Message {
 }
 
 export type Log = (line: string) => void;
+export type PrintPass = 0 | 1 | 2 | 3;
+export type PrintProgress = (pass: PrintPass) => void;
 
 function encode(message: Message): Uint8Array {
   const payload = message.payload ?? new Uint8Array();
@@ -79,7 +81,13 @@ function stateError(message: Required<Message>): Error {
   return new Error(`${detail} (PPVP stato=${message.param1}, codice=${message.param2}, dettaglio=${message.reserved})`);
 }
 
-export async function print(port: SerialPort, jpeg: Uint8Array, log: Log, timeoutMs = 180_000): Promise<void> {
+export async function print(
+  port: SerialPort,
+  jpeg: Uint8Array,
+  log: Log,
+  onProgress?: PrintProgress,
+  timeoutMs = 180_000,
+): Promise<void> {
   if (!port.readable || !port.writable) throw new Error("Porta seriale non aperta");
   const serialReader = port.readable.getReader();
   const serialWriter = port.writable.getWriter();
@@ -121,6 +129,9 @@ export async function print(port: SerialPort, jpeg: Uint8Array, log: Log, timeou
             new DataView(payload.buffer).setUint32(0, jpeg.length, false);
             await write({ command: 5, param1: 1, payload });
             started = true;
+          } else if (message.param1 === 3 && message.payload.length >= 8) {
+            const pass = message.payload[7];
+            if (pass <= 3) onProgress?.(pass as PrintPass);
           } else if (message.param1 === 6) {
             await write({ command: 1 });
             return;

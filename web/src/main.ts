@@ -1,7 +1,7 @@
 import "./style.css";
-import { encodeJpeg, loadBitmap, renderImage, type CropTransform } from "./image";
+import { applyAutoWhiteBalance, applyColorAdjustments, encodeJpeg, loadBitmap, renderImage, type CropTransform } from "./image";
 import { profiles, type ModelName } from "./models";
-import { print } from "./ppvp";
+import { print, type PrintPass } from "./ppvp";
 
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   <header><span class="eyebrow">KODAK · PPVP</span><h1>K Print</h1><p>Stampa diretta Bluetooth dalla tua scrivania.</p></header>
@@ -14,6 +14,13 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       <label class="upload">Carica immagine<input id="file" type="file" accept="image/jpeg,image/png,image/webp" /></label>
       <label>Modello<select id="model"><option value="p300r">Kodak P300R · 896 × 896</option><option value="p210r">Kodak P210R · 640 × 1024</option></select></label>
       <label class="switch"><input id="fit" type="checkbox" checked /><span></span><div><strong>Foto intera</strong><small>Aggiunge margini bianchi senza tagliare</small></div></label>
+      <label class="switch"><input id="awb" type="checkbox" /><span></span><div><strong>Correzione colore AWB</strong><small>Neutralizza automaticamente le dominanti cromatiche</small></div></label>
+      <div class="adjust-controls">
+        <label>Saturazione <output id="saturation-value">100%</output><input id="saturation" type="range" min="0" max="200" value="100" /></label>
+        <label>Luminosità <output id="brightness-value">100%</output><input id="brightness" type="range" min="50" max="150" value="100" /></label>
+        <label>Contrasto <output id="contrast-value">100%</output><input id="contrast" type="range" min="50" max="150" value="100" /></label>
+        <button id="reset-color" class="compact" type="button">Ripristina colore</button>
+      </div>
       <div id="crop-controls" class="crop-controls" hidden>
         <label>Zoom <output id="zoom-value">100%</output><input id="zoom" type="range" min="0.25" max="3" step="0.01" value="1" /></label>
         <button id="reset-crop" class="compact" type="button">Ricentra immagine</button>
@@ -22,6 +29,12 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       <div class="connection"><span id="dot"></span><div><strong id="connection-label">Stampante non collegata</strong><small>Chrome desktop 117 o successivo</small></div></div>
       <button id="connect" class="secondary">Collega stampante</button>
       <button id="print" class="primary" disabled>Stampa fotografia</button>
+      <div id="print-progress" class="print-progress" hidden>
+        <div class="pass pass-yellow"><span></span><strong>Giallo</strong></div>
+        <div class="pass pass-magenta"><span></span><strong>Magenta</strong></div>
+        <div class="pass pass-cyan"><span></span><strong>Ciano</strong></div>
+        <div class="pass pass-protect"><span></span><strong>Protezione</strong></div>
+      </div>
       <p id="status" role="status">Associa prima la Kodak nelle impostazioni Bluetooth del computer.</p>
       <details><summary>Log protocollo</summary><pre id="log"></pre></details>
     </div>
@@ -31,6 +44,14 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
 const fileInput = document.querySelector<HTMLInputElement>("#file")!;
 const modelSelect = document.querySelector<HTMLSelectElement>("#model")!;
 const fitInput = document.querySelector<HTMLInputElement>("#fit")!;
+const awbInput = document.querySelector<HTMLInputElement>("#awb")!;
+const saturationInput = document.querySelector<HTMLInputElement>("#saturation")!;
+const brightnessInput = document.querySelector<HTMLInputElement>("#brightness")!;
+const contrastInput = document.querySelector<HTMLInputElement>("#contrast")!;
+const saturationValue = document.querySelector<HTMLOutputElement>("#saturation-value")!;
+const brightnessValue = document.querySelector<HTMLOutputElement>("#brightness-value")!;
+const contrastValue = document.querySelector<HTMLOutputElement>("#contrast-value")!;
+const resetColorButton = document.querySelector<HTMLButtonElement>("#reset-color")!;
 const cropControls = document.querySelector<HTMLDivElement>("#crop-controls")!;
 const zoomInput = document.querySelector<HTMLInputElement>("#zoom")!;
 const zoomValue = document.querySelector<HTMLOutputElement>("#zoom-value")!;
@@ -40,6 +61,8 @@ const dropZone = document.querySelector<HTMLDivElement>("#drop-zone")!;
 const empty = document.querySelector<HTMLDivElement>("#empty")!;
 const connectButton = document.querySelector<HTMLButtonElement>("#connect")!;
 const printButton = document.querySelector<HTMLButtonElement>("#print")!;
+const printProgress = document.querySelector<HTMLDivElement>("#print-progress")!;
+const passElements = [...printProgress.querySelectorAll<HTMLElement>(".pass")];
 const status = document.querySelector<HTMLParagraphElement>("#status")!;
 const connectionLabel = document.querySelector<HTMLElement>("#connection-label")!;
 const dot = document.querySelector<HTMLElement>("#dot")!;
@@ -62,9 +85,32 @@ function setStatus(message: string, error = false) { status.textContent = messag
 function updatePrintButton() { printButton.disabled = busy || !port || !jpeg; connectButton.disabled = busy; }
 function invalidatePreparedImage() { jpeg = undefined; updatePrintButton(); }
 
-function renderPreview() {
+const passLabels = ["Giallo", "Magenta", "Ciano", "Protezione"] as const;
+
+function resetPrintProgress() {
+  printProgress.hidden = false;
+  passElements.forEach((element) => element.classList.remove("active", "complete"));
+}
+
+function updatePrintProgress(pass: PrintPass) {
+  passElements.forEach((element, index) => {
+    element.classList.toggle("complete", index < pass);
+    element.classList.toggle("active", index === pass);
+  });
+  setStatus(`Passata ${pass + 1} di 4 · ${passLabels[pass]}`);
+}
+
+function renderPreview(applyCorrection = true) {
   if (!bitmap) return;
   transform = renderImage(bitmap, profiles[modelSelect.value as ModelName], fitInput.checked, canvas, transform);
+  if (applyCorrection) {
+    if (awbInput.checked) applyAutoWhiteBalance(canvas);
+    applyColorAdjustments(canvas, {
+      saturation: Number(saturationInput.value) / 100,
+      brightness: Number(brightnessInput.value) / 100,
+      contrast: Number(contrastInput.value) / 100,
+    });
+  }
   zoomInput.value = String(transform.zoom);
   zoomValue.value = `${Math.round(transform.zoom * 100)}%`;
   cropControls.hidden = fitInput.checked;
@@ -74,7 +120,7 @@ async function encodePreview() {
   if (!bitmap) return;
   renderPreview();
   jpeg = await encodeJpeg(canvas);
-  setStatus(`Immagine pronta · ${(jpeg.length / 1024).toFixed(0)} KiB · JPEG sRGB`);
+  setStatus(`Immagine pronta · ${(jpeg.length / 1024).toFixed(0)} KiB · JPEG sRGB${awbInput.checked ? " · AWB" : ""}`);
   updatePrintButton();
 }
 function scheduleEncode() {
@@ -96,14 +142,31 @@ async function refreshImage(reload = false) {
   jpeg = await encodeJpeg(canvas);
   empty.hidden = true;
   canvas.hidden = false;
-  setStatus(`Immagine pronta · ${(jpeg.length / 1024).toFixed(0)} KiB · JPEG sRGB`);
+  setStatus(`Immagine pronta · ${(jpeg.length / 1024).toFixed(0)} KiB · JPEG sRGB${awbInput.checked ? " · AWB" : ""}`);
   updatePrintButton();
 }
 
 fileInput.addEventListener("change", () => { selectedFile = fileInput.files?.[0]; void refreshImage(true).catch((error) => setStatus(String(error), true)); });
 modelSelect.addEventListener("change", () => void refreshImage().catch((error) => setStatus(String(error), true)));
 fitInput.addEventListener("change", () => { invalidatePreparedImage(); void encodePreview().catch((error) => setStatus(String(error), true)); });
-zoomInput.addEventListener("input", () => { invalidatePreparedImage(); transform.zoom = Number(zoomInput.value); renderPreview(); scheduleEncode(); });
+awbInput.addEventListener("change", () => { invalidatePreparedImage(); void encodePreview().catch((error) => setStatus(String(error), true)); });
+for (const [input, output] of [
+  [saturationInput, saturationValue],
+  [brightnessInput, brightnessValue],
+  [contrastInput, contrastValue],
+] as const) input.addEventListener("input", () => {
+  output.value = `${input.value}%`;
+  invalidatePreparedImage();
+  renderPreview(false);
+  scheduleEncode();
+});
+resetColorButton.addEventListener("click", () => {
+  saturationInput.value = brightnessInput.value = contrastInput.value = "100";
+  saturationValue.value = brightnessValue.value = contrastValue.value = "100%";
+  invalidatePreparedImage();
+  void encodePreview().catch((error) => setStatus(String(error), true));
+});
+zoomInput.addEventListener("input", () => { invalidatePreparedImage(); transform.zoom = Number(zoomInput.value); renderPreview(false); scheduleEncode(); });
 resetCropButton.addEventListener("click", () => { transform = { zoom: 1, offsetX: 0, offsetY: 0 }; void encodePreview().catch((error) => setStatus(String(error), true)); });
 
 canvas.addEventListener("wheel", (event) => {
@@ -124,7 +187,7 @@ canvas.addEventListener("wheel", (event) => {
   transform.zoom = newZoom;
   transform.offsetX = ratio * centerX + (1 - ratio) * pointerX - canvas.width / 2;
   transform.offsetY = ratio * centerY + (1 - ratio) * pointerY - canvas.height / 2;
-  renderPreview();
+  renderPreview(false);
   scheduleEncode();
 }, { passive: false });
 
@@ -140,7 +203,7 @@ canvas.addEventListener("pointermove", (event) => {
   const rect = canvas.getBoundingClientRect();
   transform.offsetX = dragStart.offsetX + (event.clientX - dragStart.x) * canvas.width / rect.width;
   transform.offsetY = dragStart.offsetY + (event.clientY - dragStart.y) * canvas.height / rect.height;
-  renderPreview();
+  renderPreview(false);
 });
 const finishDrag = () => {
   if (!dragStart) return;
@@ -179,8 +242,19 @@ connectButton.addEventListener("click", async () => {
 
 printButton.addEventListener("click", async () => {
   if (!port || !jpeg) return;
-  busy = true; updatePrintButton(); logElement.textContent = ""; setStatus("Invio alla stampante… non spegnerla durante le quattro passate.");
-  try { await print(port, jpeg, log); setStatus("Stampa completata. Attendi l’espulsione definitiva."); }
+  busy = true;
+  updatePrintButton();
+  logElement.textContent = "";
+  resetPrintProgress();
+  setStatus("Trasferimento della fotografia alla stampante…");
+  try {
+    await print(port, jpeg, log, updatePrintProgress);
+    passElements.forEach((element) => {
+      element.classList.remove("active");
+      element.classList.add("complete");
+    });
+    setStatus("Stampa completata. Attendi l’espulsione definitiva.");
+  }
   catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), true);
     try { await port.close(); } catch { /* La porta può essere già chiusa. */ }
